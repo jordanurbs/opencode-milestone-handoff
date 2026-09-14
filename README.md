@@ -1,29 +1,53 @@
-# OpenCode Milestone Handoff
+# OpenCode Session Handoff
 
-A global [OpenCode](https://opencode.ai) plugin. When an agent finishes a milestone in
-a multi-step plan and the current session is already past a context threshold
-(default **15%**), the next milestone is handed to a **fresh session** instead of
-continuing in the swollen one. The new session loads your `AGENTS.md` automatically and
-starts from a handoff brief — the agent's own note plus a model-generated summary of the
-prior session.
+Global [OpenCode](https://opencode.ai) plugins that keep agent sessions lean by handing
+work off to fresh sessions at natural boundaries. Two complementary features:
 
-Installed once, globally. Works in every project.
+1. **Plan → build handoff.** Finish planning in plan mode and it saves the plan to
+   `.opencode/plans/` and starts a fresh **build** session that reads the plan and
+   implements it. Because the build session runs on the *build* agent, you can plan with a
+   smart, expensive reasoning model and build with a cheaper one — automatically.
+2. **Milestone handoff.** While building, when the agent finishes a milestone and the
+   session is already past a context threshold (default **15%**), the next milestone is
+   handed to a fresh session with a carried-over brief (the agent's note plus a
+   model-generated summary of the prior session).
+
+They stack: plan with the smart model → build with the cheap model → stay lean across
+milestones. Installed once, globally. Works in every project.
 
 ---
 
 ## Why
 
 Long agent sessions rot: context fills with stale tool output, the model gets slower and
-dumber, and auto-compaction summarizes away detail you wanted. This plugin keeps each
-session lean by starting the next milestone clean once the current one is heavy — while
-carrying forward a real handoff brief so nothing is lost.
+dumber, and auto-compaction summarizes away detail you wanted. And reasoning-grade models
+are expensive to run for hours of mechanical edits. These plugins keep each session lean
+and let you spend the smart model only where it pays off — planning — while a cheaper model
+does the building, with real handoff briefs so nothing is lost.
 
 ---
 
 ## How it works
 
-1. A custom **`milestone` tool** is registered globally. Your global `AGENTS.md` tells the
-   agent to call it whenever it finishes a milestone and more work remains.
+### Plan → build handoff
+
+1. A custom **`build_handoff` tool** is registered globally. Your global `AGENTS.md` tells
+   the plan agent to call it once the plan is finalized instead of implementing it.
+2. The tool saves the plan to `.opencode/plans/<timestamp>-<slug>.md` (OpenCode's native
+   plan-mode location) and creates a new session on the **build** agent.
+3. It starts that session **without specifying a model**, so OpenCode resolves the model as
+   `input.model ?? agent.build.model ?? default` — i.e. the build agent's configured
+   (cheaper) model. The session loads `AGENTS.md`, reads the plan file, and implements it.
+
+```
+plan finalized ─▶ build_handoff ─▶ save .opencode/plans/<slug>.md
+                                 └▶ new session (build agent, cheap model) ─▶ reads plan, builds
+```
+
+### Milestone handoff
+
+1. A custom **`milestone` tool** is registered globally. Your `AGENTS.md` tells the agent to
+   call it whenever it finishes a milestone and more work remains.
 2. On call, the plugin measures the session's token usage against the model's context
    window:
    - **Below the threshold** → returns "continue here", the same agent keeps going.
@@ -32,8 +56,7 @@ carrying forward a real handoff brief so nothing is lost.
 3. When the old session goes **idle** (its turn ended, it's no longer busy — you can't
    summarize a busy session), a `session.idle` hook runs `session.summarize` on it, reads
    the summary, and starts the new session (`promptAsync`) with the handoff brief. The new
-   session inherits the same agent + model and loads `AGENTS.md`, then begins the next
-   milestone.
+   session inherits the same agent + model and loads `AGENTS.md`, then continues.
 4. A fresh session starts near 0% context, so it keeps working until *it* crosses the
    threshold — which prevents handoff thrashing.
 
@@ -53,10 +76,11 @@ milestone done ──▶ milestone tool ──┬─ under 15% ─▶ continue i
 
 ```
 opencode/
-  plugins/handoff.ts        the plugin (installs to ~/.config/opencode/plugins/)
-  AGENTS.snippet.md         the instruction to add to your global AGENTS.md
-  opencode.example.json     optional: force a specific model for summaries
-install.sh                  one-shot installer (idempotent)
+  plugins/plan-handoff.ts   plan mode -> fresh build session (build_handoff tool)
+  plugins/handoff.ts        milestone -> fresh session over threshold (milestone tool + idle hook)
+  AGENTS.snippet.md         the instructions to add to your global AGENTS.md (both rules)
+  opencode.example.json     agent models: smart plan, cheap build, cheap summary
+install.sh                  one-shot installer (idempotent; copies all plugins)
 SETUP_FOR_AGENT.md          paste this into OpenCode to have the agent install it for you
 ```
 
@@ -109,11 +133,31 @@ Default is 15%. Override with an environment variable in your shell profile:
 export OPENCODE_HANDOFF_THRESHOLD=0.15   # 0.0–1.0, fraction of the context window
 ```
 
-### 4. (Optional) Force a summary model
+### 4. Configure your models (recommended — this is what enables plan-smart / build-cheap)
 
-By default the summary uses the session's own model. To use a cheaper/bigger one, merge
-`opencode/opencode.example.json` into `~/.config/opencode/opencode.json` (sets a
-`compaction` agent model).
+Merge `opencode/opencode.example.json` into `~/.config/opencode/opencode.json`, using models
+you actually have access to:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "plan": { "model": "<smart reasoning model>" },
+    "build": { "model": "<economical build model>" },
+    "compaction": { "model": "<cheap summary model>" }
+  }
+}
+```
+
+- `agent.plan.model` — the smart model you plan with in plan mode.
+- `agent.build.model` — the cheaper model the build session inherits when `build_handoff`
+  starts it without an explicit model. **This is the mechanism** for planning smart and
+  building cheap.
+- `agent.compaction.model` — model used to summarize the retiring session on milestone
+  handoff (optional).
+
+You can still override the build model per-handoff by passing `build_model` to the
+`build_handoff` tool.
 
 ### 5. Restart OpenCode
 
@@ -122,10 +166,12 @@ can't be done by an agent — OpenCode has to be restarted for the plugin to loa
 
 ### 6. Verify
 
-- Start a real task, let it do enough work to cross the threshold, and watch a new
-  `Handoff: ...` session appear and start running on its own.
-- To force it immediately for a test: `export OPENCODE_HANDOFF_THRESHOLD=0.01`, restart,
-  run a short task.
+- **Plan → build:** switch to plan mode (`Tab`), plan something, then approve / say "build
+  it." A `Build: ...` session should start on its own, on the build agent's model, and begin
+  implementing from a file under `.opencode/plans/`.
+- **Milestone:** start a real task, let it do enough work to cross the threshold, and watch a
+  new `Handoff: ...` session appear and run on its own. To force it immediately for a test:
+  `export OPENCODE_HANDOFF_THRESHOLD=0.01`, restart, run a short task.
 
 ---
 
@@ -136,12 +182,12 @@ session and it will create the files for you.
 
 | Step | Who |
 | --- | --- |
-| Create `~/.config/opencode/plugins/handoff.ts` | Agent |
-| Append to `~/.config/opencode/AGENTS.md` | Agent |
-| Edit `~/.config/opencode/opencode.json` (optional) | Agent |
+| Copy plugins to `~/.config/opencode/plugins/` | Agent |
+| Append rules to `~/.config/opencode/AGENTS.md` | Agent |
+| Edit `~/.config/opencode/opencode.json` (agent models) | Agent |
 | Approve writing outside the project directory | **Human** (permission prompt) |
 | Restart OpenCode | **Human** (an agent can't restart its own host) |
-| Confirm the plugin loaded / first live test | **Human** |
+| Confirm the plugins loaded / first live test | **Human** |
 
 ---
 
@@ -149,8 +195,12 @@ session and it will create the files for you.
 
 | Setting | Where | Default | Meaning |
 | --- | --- | --- | --- |
+| plan model | `agent.plan.model` in `opencode.json` | global default | The smart model you plan with. |
+| build model | `agent.build.model` in `opencode.json` | global default | The model the handed-off build session runs on (the cheap builder). |
+| `OPENCODE_BUILD_AGENT` | env var | `build` | Which agent the plan handoff starts the build session as. |
+| `build_model` | `build_handoff` tool arg | build agent's model | Per-handoff override of the build model (`providerID/modelID`). |
 | `OPENCODE_HANDOFF_THRESHOLD` | env var | `0.15` | Fraction of the context window above which a milestone hands off instead of continuing. |
-| summary model | `agent.compaction.model` in `opencode.json` | session model | Model used to summarize the retiring session. |
+| summary model | `agent.compaction.model` in `opencode.json` | session model | Model used to summarize the retiring session on milestone handoff. |
 
 ---
 
@@ -169,17 +219,24 @@ session and it will create the files for you.
 - **Runtime import.** `@opencode-ai/plugin` resolves from OpenCode at runtime, so nothing
   to install to run. For editor type-checking only, add a `package.json` in
   `~/.config/opencode/` with `@opencode-ai/plugin` as a dev dependency.
+- **Plan mode is read-only, but this still works.** The plan agent denies edit tools; the
+  `build_handoff` tool writes the plan file with the plugin's own filesystem access (not the
+  agent's `write` tool), so saving works even in plan mode. If the `build_handoff` tool
+  isn't offered to the plan agent in your setup, enable it explicitly with
+  `"agent": { "plan": { "tools": { "build_handoff": true } } }` in `opencode.json`.
+- **`.opencode/plans/`** is where plans are saved (OpenCode's native plan-mode location).
+  Commit it if you want plans tracked, or add it to `.gitignore`.
 
 ---
 
 ## Uninstall
 
 ```bash
-rm ~/.config/opencode/plugins/handoff.ts
+rm ~/.config/opencode/plugins/handoff.ts ~/.config/opencode/plugins/plan-handoff.ts
 ```
 
-Then remove the "Multi-step plans and handoff" section from `~/.config/opencode/AGENTS.md`,
-and restart OpenCode.
+Then remove the "Plan mode: save the plan and hand off to build" and "Multi-step plans and
+handoff" sections from `~/.config/opencode/AGENTS.md`, and restart OpenCode.
 
 ---
 

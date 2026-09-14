@@ -1,3 +1,12 @@
+## Plan mode: save the plan and hand off to build
+
+When you are in plan mode and the plan is finalized (the user approves it, or asks to
+build / implement / proceed), do NOT implement it yourself. Instead call the
+`build_handoff` tool with a short `title` and the full `plan` in markdown. It saves the
+plan under `.opencode/plans/` and starts a fresh build session — which can run a cheaper
+model — that reads the plan and implements it. After calling it, stop. (Build agent: this
+does not apply to you; implement normally.)
+
 ## Multi-step plans and handoff
 
 When working through a plan with multiple milestones, call the `milestone` tool the

@@ -8,15 +8,17 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
-PLUGIN_SRC="$REPO_DIR/opencode/plugins/handoff.ts"
 SNIPPET_SRC="$REPO_DIR/opencode/AGENTS.snippet.md"
 MARKER="## Multi-step plans and handoff"
 
 echo "==> Installing to: $CONFIG_DIR"
 mkdir -p "$CONFIG_DIR/plugins"
 
-echo "==> Copying plugin -> $CONFIG_DIR/plugins/handoff.ts"
-cp "$PLUGIN_SRC" "$CONFIG_DIR/plugins/handoff.ts"
+echo "==> Copying plugins -> $CONFIG_DIR/plugins/"
+for f in "$REPO_DIR"/opencode/plugins/*.ts; do
+  echo "      - $(basename "$f")"
+  cp "$f" "$CONFIG_DIR/plugins/"
+done
 
 AGENTS_FILE="$CONFIG_DIR/AGENTS.md"
 if [ -f "$AGENTS_FILE" ] && grep -qF "$MARKER" "$AGENTS_FILE"; then
