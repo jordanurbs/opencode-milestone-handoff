@@ -1,0 +1,14 @@
+{
+  "name": "opencode-session-handoff",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Global OpenCode plugins for session handoff. This package exists only for CI type-checking; the plugins run inside OpenCode with no install required.",
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "typescript": "^5.6.3"
+  }
+}

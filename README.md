@@ -1,5 +1,7 @@
 # OpenCode Session Handoff
 
+[![CI](https://github.com/jordanurbs/opencode-milestone-handoff/actions/workflows/ci.yml/badge.svg)](https://github.com/jordanurbs/opencode-milestone-handoff/actions/workflows/ci.yml)
+
 Global [OpenCode](https://opencode.ai) plugins that keep agent sessions lean by handing
 work off to fresh sessions at natural boundaries. Two complementary features:
 
@@ -200,6 +202,7 @@ session and it will create the files for you.
 | `OPENCODE_BUILD_AGENT` | env var | `build` | Which agent the plan handoff starts the build session as. |
 | `build_model` | `build_handoff` tool arg | build agent's model | Per-handoff override of the build model (`providerID/modelID`). |
 | `OPENCODE_HANDOFF_THRESHOLD` | env var | `0.15` | Fraction of the context window above which a milestone hands off instead of continuing. |
+| `OPENCODE_HANDOFF_LINK_SESSIONS` | env var | `true` | Link each new session to its origin as a child (a navigable tree). Set `false` to make handoffs top-level sessions. |
 | summary model | `agent.compaction.model` in `opencode.json` | session model | Model used to summarize the retiring session on milestone handoff. |
 
 ---
@@ -214,8 +217,12 @@ session and it will create the files for you.
   own fields.
 - **The old session stops by instruction, not force.** To hard-stop it, add
   `await client.session.abort({ path: { id: oldSessionID } })` in `runHandoff`.
-- **New sessions are top-level** (visible in the session list). For a child/linked
-  session, pass `parentID: ctx.sessionID` to `session.create`.
+- **Session lineage / where to find handed-off sessions.** By default each new session is
+  created as a **child** of the one it came from (`parentID`), so plan → build → milestone
+  chains form a navigable tree. Child sessions don't appear in the flat top-level session
+  list (OpenCode filters that list to roots); reach them in the TUI with the
+  `session_child_first` keybind (default `<leader>down`) from the parent. Prefer a flat list
+  of independent sessions? Set `OPENCODE_HANDOFF_LINK_SESSIONS=false`.
 - **Runtime import.** `@opencode-ai/plugin` resolves from OpenCode at runtime, so nothing
   to install to run. For editor type-checking only, add a `package.json` in
   `~/.config/opencode/` with `@opencode-ai/plugin` as a dev dependency.
@@ -226,6 +233,23 @@ session and it will create the files for you.
   `"agent": { "plan": { "tools": { "build_handoff": true } } }` in `opencode.json`.
 - **`.opencode/plans/`** is where plans are saved (OpenCode's native plan-mode location).
   Commit it if you want plans tracked, or add it to `.gitignore`.
+
+---
+
+## Development
+
+The plugins import `@opencode-ai/plugin`, which OpenCode supplies at runtime and can't be
+`npm install`ed for a type check. CI runs a `tsc` smoke test against a small API stub in
+`ci/stubs/opencode-plugin.ts` (mapped in via `tsconfig.json` `paths`) to catch typos, bad
+property access, and wrong call shapes when the plugins change. Run it locally:
+
+```bash
+bun install && bun run typecheck
+# or: npm install && npm run typecheck
+```
+
+The stub encodes this repo's understanding of the API — it is a regression guard for edits
+here, not a guarantee against upstream OpenCode API drift.
 
 ---
 

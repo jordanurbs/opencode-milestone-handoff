@@ -7,6 +7,11 @@ import path from "node:path"
 // is what makes "plan with a smart model, build with a cheap one" work.
 const BUILD_AGENT = process.env.OPENCODE_BUILD_AGENT ?? "build"
 
+// Link the build session to the plan session as a child, so they form a navigable tree
+// (reach children in the TUI with the `session_child_first` keybind, default <leader>down).
+// Set OPENCODE_HANDOFF_LINK_SESSIONS=false to make the build session top-level instead.
+const LINK_SESSIONS = (process.env.OPENCODE_HANDOFF_LINK_SESSIONS ?? "true") !== "false"
+
 function slugify(s: string) {
   return (
     s
@@ -49,9 +54,12 @@ export const PlanHandoffPlugin: Plugin = async ({ client, directory }) => {
           const doc = `# ${args.title}\n\n_Plan saved ${new Date().toISOString()} for build handoff._\n\n${args.plan}\n`
           await fs.writeFile(abs, doc, "utf8")
 
-          // 2. Create the build session.
+          // 2. Create the build session (linked to the plan session as a child).
           const created = await client.session.create({
-            body: { title: `Build: ${args.title.slice(0, 60)}` },
+            body: {
+              title: `Build: ${args.title.slice(0, 60)}`,
+              ...(LINK_SESSIONS ? { parentID: ctx.sessionID } : {}),
+            },
             query: { directory: worktree },
           })
           const newSessionID = created.data!.id

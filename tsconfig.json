@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@opencode-ai/plugin": ["./ci/stubs/opencode-plugin.ts"]
+    }
+  },
+  "include": ["opencode/plugins/**/*.ts", "ci/stubs/**/*.ts"]
+}

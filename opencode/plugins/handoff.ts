@@ -4,6 +4,11 @@ import { tool } from "@opencode-ai/plugin"
 // Fraction of the model context window above which a milestone becomes a handoff.
 const THRESHOLD = Number(process.env.OPENCODE_HANDOFF_THRESHOLD ?? "0.15")
 
+// Link the new session to the old one as a child, so handoffs form a navigable tree
+// (reach children in the TUI with the `session_child_first` keybind, default <leader>down).
+// Set OPENCODE_HANDOFF_LINK_SESSIONS=false to make each handoff a top-level session instead.
+const LINK_SESSIONS = (process.env.OPENCODE_HANDOFF_LINK_SESSIONS ?? "true") !== "false"
+
 type HandoffPlan = {
   newSessionID: string
   agent?: string
@@ -137,7 +142,10 @@ export const HandoffPlugin: Plugin = async ({ client, directory }) => {
           }
 
           const created = await client.session.create({
-            body: { title: `Handoff: ${args.next_goal.slice(0, 60)}` },
+            body: {
+              title: `Handoff: ${args.next_goal.slice(0, 60)}`,
+              ...(LINK_SESSIONS ? { parentID: ctx.sessionID } : {}),
+            },
             query: { directory },
           })
           const newSessionID = created.data!.id
